@@ -1,19 +1,8 @@
 use std::io::Write;
-use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
 use reqwest::blocking::Client;
-use soup::prelude::*;
-
-fn crate_dir() -> Option<PathBuf> {
-    std::env::current_exe()
-        .ok()?
-        .parent()?
-        .parent()?
-        .parent()?
-        .to_owned()
-        .into()
-}
+use scraper::{ElementRef, Html, Selector};
 
 fn prompt(msg: &str) -> Result<bool> {
     let mut input = String::new();
@@ -31,9 +20,15 @@ fn prompt(msg: &str) -> Result<bool> {
     }
 }
 
-fn pick_block<N: NodeExt>(blocks: Vec<N>) -> Result<N> {
+fn pick_block(blocks: Vec<ElementRef>) -> Result<ElementRef> {
+    if blocks.is_empty() {
+        bail!("no code blocks");
+    } else if blocks.len() == 1 {
+        return Ok(blocks.into_iter().next().unwrap());
+    }
+
     for block in blocks {
-        println!("{}", block.text());
+        println!("{}", block.inner_html());
 
         if prompt("is this the test input?")? {
             return Ok(block);
@@ -42,12 +37,14 @@ fn pick_block<N: NodeExt>(blocks: Vec<N>) -> Result<N> {
     bail!("no match");
 }
 
-fn get_test_output<N: QueryBuilderExt>(part: &N) -> Option<String> {
-    part.tag("code")
-        .find_all()
-        .flat_map(|n| n.tag("em"))
+fn sel(s: &str) -> Selector {
+    Selector::parse(s).unwrap()
+}
+
+fn get_test_output(part: ElementRef) -> Option<String> {
+    part.select(&sel("code > em"))
         .last()
-        .map(|n| n.text())
+        .map(|n| n.inner_html())
 }
 
 fn what_year_is_it() -> i32 {
@@ -77,14 +74,13 @@ fn main() -> Result<()> {
 
     let year = what_year_is_it();
 
-    let cookie = std::fs::read_to_string(crate_dir().context("crate dir fail")?.join("session"))
-        .context("couldn't read session")?;
+    let cookie = include_str!("../session").trim();
     let client = Client::new();
 
     let http_get = |url: &str| -> Result<String> {
         client
             .get(url)
-            .header("Cookie", &cookie)
+            .header("Cookie", cookie)
             .header("User-Agent", "The0x539's AoC scraper")
             .send()?
             .error_for_status()?
@@ -95,23 +91,19 @@ fn main() -> Result<()> {
     let base_url = format!("https://adventofcode.com/{year}/day/{day}");
     let html = http_get(&base_url)?;
 
-    // TODO: use kuchikiki
-    let soup = Soup::new(&html);
-    let parts = soup.class("day-desc").find_all().collect::<Vec<_>>();
+    let document = Html::parse_document(&html);
 
-    let part1 = parts.get(0).context("no part 1 description")?;
+    let desc_selector = sel(".day-desc");
+    let mut parts = document.select(&desc_selector);
 
-    let blocks = part1.tag("pre").find_all().collect::<Vec<_>>();
+    let part1 = parts.next().context("no part 1 description")?;
 
-    let test_input = match blocks.len() {
-        0 => bail!("no <pre> elements"),
-        1 => blocks[0].text(),
-        _ => pick_block(blocks)?.text(),
-    };
+    let blocks = part1.select(&sel("pre > code")).collect::<Vec<_>>();
+    let test_input = pick_block(blocks)?.inner_html();
 
     let test_output_1 = get_test_output(part1).context("could not find part 1 test output")?;
 
-    let test_output_2 = if let Some(part2) = parts.get(1) {
+    let test_output_2 = if let Some(part2) = parts.next() {
         get_test_output(part2).context("could not find part 2 test output")?
     } else {
         "0".to_owned()
