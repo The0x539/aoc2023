@@ -1,7 +1,5 @@
 #![cfg_attr(test, feature(test))]
 
-use std::collections::HashMap;
-
 use util::*;
 
 type N = u32;

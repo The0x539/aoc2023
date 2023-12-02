@@ -2,6 +2,8 @@ use std::fmt::{Debug, Display};
 use std::ops::{Add, AddAssign};
 use std::str::FromStr;
 
+pub use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+
 pub fn p<T>(s: &str) -> T
 where
     T: FromStr,
