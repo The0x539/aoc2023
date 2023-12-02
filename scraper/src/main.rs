@@ -82,10 +82,12 @@ fn main() -> Result<()> {
             .get(url)
             .header("Cookie", cookie)
             .header("User-Agent", "The0x539's AoC scraper")
-            .send()?
-            .error_for_status()?
+            .send()
+            .context("transport error")?
+            .error_for_status()
+            .context("http error")?
             .text()
-            .map_err(From::from)
+            .context("body error")
     };
 
     let base_url = format!("https://adventofcode.com/{year}/day/{day}");
