@@ -12,7 +12,7 @@ where
     s.parse().unwrap()
 }
 
-pub fn ints<T>(s: &str) -> Vec<T>
+pub fn ints_g<T, C: FromIterator<T>>(s: &str) -> C
 where
     T: FromStr,
     T::Err: Debug,
@@ -21,6 +21,14 @@ where
         .filter(|s| !s.is_empty())
         .map(p)
         .collect()
+}
+
+pub fn ints<T>(s: &str) -> Vec<T>
+where
+    T: FromStr,
+    T::Err: Debug,
+{
+    ints_g(s)
 }
 
 #[derive(Debug, Default, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]

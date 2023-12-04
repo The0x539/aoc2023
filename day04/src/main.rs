@@ -10,7 +10,7 @@ type Out = usize;
 fn parse(s: &'static str) -> In {
     let (_, s) = s.split_once(':').unwrap();
     let (l, r) = s.split_once('|').unwrap();
-    (ints(l).into_iter().collect(), ints(r).into_iter().collect())
+    (ints_g(l), ints_g(r))
 }
 
 fn part1(n: &[In]) -> Out {
