@@ -31,6 +31,14 @@ where
     ints_g(s)
 }
 
+pub fn ints_n<T, const N: usize>(s: &str) -> [T; N]
+where
+    T: FromStr,
+    T::Err: Debug,
+{
+    ints(s).try_into().ok().unwrap()
+}
+
 #[derive(Debug, Default, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Pos<N> {
     pub x: N,
