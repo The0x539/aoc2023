@@ -17,7 +17,9 @@ where
     T: FromStr,
     T::Err: Debug,
 {
-    s.split(|c: char| !c.is_numeric())
+    let signed = "-1".parse::<T>().is_ok();
+
+    s.split(|c: char| !(c.is_numeric() || (signed && c == '-')))
         .filter(|s| !s.is_empty())
         .map(p)
         .collect()
