@@ -2,33 +2,26 @@
 
 use util::*;
 
-type N = usize;
-
 type In = Vec<&'static str>;
-type Out = N;
 
 fn parse(s: &'static str) -> In {
     s.replace('\n', "").leak().split(',').collect()
 }
 
-fn hash(s: &str) -> N {
-    s.chars().fold(0, |a, c| ((a + c as N) * 17) % 256)
+fn hash(s: &str) -> u8 {
+    s.bytes().fold(0, |a, c| a.wrapping_add(c).wrapping_mul(17))
 }
 
-fn part1(n: &In) -> Out {
-    let mut x = 0;
-    for step in n {
-        x += hash(step);
-    }
-    x
+fn part1(n: &In) -> u32 {
+    n.iter().copied().map(hash).map(u32::from).sum()
 }
 
-fn part2(n: &In) -> Out {
-    let mut buckets: Vec<Vec<(&str, N)>> = vec![vec![]; 256];
+fn part2(n: &In) -> u32 {
+    let mut buckets: Vec<Vec<(&str, u32)>> = vec![vec![]; 256];
 
     for step in n {
         let label = step.split_once(&['=', '-']).unwrap().0;
-        let bucket = &mut buckets[hash(label)];
+        let bucket = &mut buckets[hash(label) as usize];
 
         let value = step.split_once('=').map(|v| p(v.1));
         let index = bucket.iter().position(|pair| pair.0 == label);
