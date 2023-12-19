@@ -1,4 +1,5 @@
 #![cfg_attr(test, feature(test))]
+#![feature(array_windows)]
 
 use util::*;
 
@@ -35,56 +36,64 @@ fn parse(s: &'static str) -> In {
     In { dir, amount, color }
 }
 
+#[derive(PartialEq, Eq, PartialOrd, Ord, Copy, Clone)]
+struct SideWall {
+    x: N,
+    upward: bool,
+}
+
 fn solve(n: &[In], get_amount: impl Fn(&In) -> (N, Dir)) -> Out {
     let cross = [(-1, 0), (0, 1), (1, 0), (0, -1)];
 
-    // let mut x0 = N::MAX;
-    // let mut y0 = N::MAX;
-    // let mut x1 = N::MIN;
-    // let mut y1 = N::MIN;
+    let mut all_walls = BTreeSet::new();
+    let mut side_walls = BTreeMap::<N, BTreeSet<SideWall>>::new();
 
-    let mut dug = BTreeSet::new();
+    let mut add = |pos: P, dir: (N, N)| {
+        all_walls.insert(pos);
+        if dir.1 != 0 {
+            let wall = SideWall {
+                x: pos.x,
+                upward: dir.1 < 0,
+            };
+            side_walls.entry(pos.y).or_default().insert(wall);
+        }
+    };
+
     let mut pos = P::default();
-    dug.insert(pos);
     for inst in n {
         let (amount, dir) = get_amount(inst);
         let dir = cross[dir as usize];
+
+        add(pos, dir);
+
         for _ in 0..amount {
             pos += dir;
-            dug.insert(pos);
+            add(pos, dir);
         }
-        // x0 = x0.min(pos.x);
-        // y0 = y0.min(pos.y);
-        // x1 = x1.max(pos.x);
-        // y1 = y1.max(pos.y);
     }
 
-    let mut interior = HashSet::new();
-    let mut to_visit = HashSet::new();
-    to_visit.insert(P::new(1, 1));
+    let mut interior = 0;
 
-    loop {
-        // let before = inside.len();
-        let mut changed = false;
-        for spot in std::mem::take(&mut to_visit) {
-            if !dug.contains(&spot) && interior.insert(spot) {
-                for offset in cross {
-                    to_visit.insert(spot + offset);
-                }
-                changed = true;
+    for (y, row) in side_walls {
+        let row = Vec::from_iter(row);
+
+        for [left, right] in row.array_windows() {
+            if !(left.upward && !right.upward) {
+                continue;
             }
+
+            let x = left.x + 1;
+            let x1 = right.x;
+
+            if all_walls.contains(&P { x, y }) {
+                continue;
+            }
+
+            interior += (x..x1).len() as usize;
         }
-        if !changed {
-            break;
-        }
-        // let after = inside.len();
-        // let n = 1000000;
-        // if before / n < after / n {
-        //     println!("{}", inside.len());
-        // }
     }
 
-    dug.len() + interior.len()
+    interior + all_walls.len()
 }
 
 fn part1(n: &[In]) -> Out {
