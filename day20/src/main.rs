@@ -37,7 +37,7 @@ fn parse(s: &'static str) -> In {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum ModuleState {
     Broadcaster,
     FlipFlop(bool),
@@ -64,7 +64,7 @@ impl ModuleState {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct Module {
     name: &'static str,
     state: ModuleState,
@@ -147,28 +147,38 @@ fn part2(n: &[In]) -> Out {
         return 0;
     }
 
-    // this seems to be three binary counters of some sort,
-    // but I can't figure out how to programatically reverse-engineer them tonight
-    println!("digraph G {{");
-    for def in n {
-        if def.kind == ModuleKind::Conjunction {
-            println!("  {} [shape=\"rectangle\", color=\"red\"]", def.name);
-        }
-        println!("  {} -> {}", def.name, def.outputs.join(", "));
-    }
-    println!("}}");
-
     let mut modules = setup(n);
 
-    let mut pulses = VecDeque::new();
+    let final_junction = modules
+        .values()
+        .find(|m| m.outputs.contains(&"rx"))
+        .unwrap()
+        .name;
 
-    for i in 1.. {
+    let goal = {
+        let ModuleState::Conjunction(inputs) = &modules[final_junction].state else {
+            panic!();
+        };
+        inputs.len()
+    };
+
+    let mut pulses = VecDeque::new();
+    let mut i = 0;
+    let mut periods = HashMap::new();
+
+    loop {
         pulses.push_back(("button", false, "broadcaster"));
+        i += 1;
+
         while let Some(pulse) = pulses.pop_front() {
             let (src_module, inbound_value, cur_module) = pulse;
 
-            if cur_module == "rx" && !inbound_value {
-                return i;
+            if cur_module == final_junction && inbound_value {
+                // println!("[{i}] {src_module} -{inbound_value}-> {cur_module}");
+                periods.insert(src_module, i);
+                if periods.len() == goal {
+                    return periods.into_values().reduce(num_integer::lcm).unwrap();
+                }
             }
 
             let Some(module) = modules.get_mut(cur_module) else {
@@ -181,23 +191,7 @@ fn part2(n: &[In]) -> Out {
                 }
             }
         }
-
-        /*
-        let penultimate = "sd";
-        let Some(Module {
-            state: ModuleState::Conjunction(inputs),
-            ..
-        }) = modules.get(penultimate)
-        else {
-            panic!();
-        };
-        if inputs.values().all(|x| *x) {
-            println!("{i}: {inputs:?}");
-        }
-        */
     }
-
-    unreachable!()
 }
 
 util::register!(parse, part1, part2);
