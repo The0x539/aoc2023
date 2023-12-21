@@ -2,7 +2,7 @@
 
 use util::*;
 
-type N = i32;
+type N = i64;
 type P = Pos<N>;
 
 type In = Vec<Spot>;
@@ -47,6 +47,7 @@ fn setup(n: &[In]) -> (P, Vec<Vec<bool>>) {
     panic!()
 }
 
+#[allow(unused)]
 fn print(grid: &[Vec<bool>], spots: &HashSet<P>) {
     for (y, row) in grid.iter().enumerate() {
         for (x, c) in row.iter().enumerate() {
@@ -92,7 +93,7 @@ fn part1(n: &[In]) -> Out {
         }
     }
 
-    print(&grid, &spots);
+    // print(&grid, &spots);
 
     spots.len()
 }
@@ -193,7 +194,7 @@ fn print_interned_tiles(tiles: &BTreeMap<P, usize>) {
     }
 }
 
-const NESW: [(i32, i32); 4] = [(0, -1), (1, 0), (0, 1), (-1, 0)];
+const NESW: [(N, N); 4] = [(0, -1), (1, 0), (0, 1), (-1, 0)];
 
 fn part2(n: &[In]) -> Out {
     let (start, grid) = setup(n);
@@ -205,13 +206,10 @@ fn part2(n: &[In]) -> Out {
     tiles.insert(P::new(0, 0), memory.intern(Tile::from([start])));
 
     let steps = if cfg!(test) { 1000 } else { 26501365 };
-    let steps = 1000;
+    const CYCLE: N = 262;
 
-    let mut last_growth = 0;
-
-    for i in 0..steps {
+    for i in 1..=steps {
         tiles.retain(|_, t| *t != blank);
-        let old_len = tiles.len();
 
         for pu in Vec::from_iter(tiles.keys().copied()) {
             for dir in NESW {
@@ -228,51 +226,63 @@ fn part2(n: &[In]) -> Out {
         tiles = new_tiles;
 
         tiles.retain(|_, t| *t != blank);
-        let new_len = tiles.len();
 
-        if new_len > old_len {
-            println!(
-                "grew {old_len} -> {new_len} at {i} ({} since last)",
-                i - last_growth
-            );
-            last_growth = i;
-            // print_interned_tiles(&tiles);
+        if i % CYCLE == steps % CYCLE && tiles.len() > 21 {
+            print_interned_tiles(&tiles);
 
-            if new_len == 25 {
-                // .    .    .    68   .    .    .
-                // .    .    916  919  921  .    .
-                // .    916  1692 384  1694 921  .
-                // 67   917  384  389  384  922  71      (i=327)
-                // .    918  1693 384  1695 923  .
-                // .    .    918  920  923  .    .
-                // .    .    .    70   .    .    .
+            let r1 = tiles.keys().map(|k| k.x).max().unwrap();
+            let r2 = {
+                let mut r = r1;
+                let mut j = i;
+                while j != steps {
+                    j += CYCLE;
+                    r += 2;
+                }
+                r
+            };
 
-                // .    .    .    .    68   .    .    .    .
-                // .    .    .    916  919  921  .    .    .
-                // .    .    916  1692 384  1694 921  .    .
-                // .    916  1692 384  389  384  1694 921  .
-                // 67   917  384  389  384  389  384  922  71    (i=458)
-                // .    918  1693 384  389  384  1695 923  .
-                // .    .    918  1693 384  1695 923  .    .
-                // .    .    .    918  920  923  .    .    .
-                // .    .    .    .    70   .    .    .    .
+            let mut end = BTreeMap::<usize, N>::new();
+            let mut insert = |p1| {
+                *end.entry(tiles[&p1]).or_default() += 1;
+            };
 
-                // .    .    .    .    .    68   .    .    .    .    .
-                // .    .    .    .    916  919  921  .    .    .    .
-                // .    .    .    916  1692 384  1694 921  .    .    .
-                // .    .    916  1692 384  389  384  1694 921  .    .
-                // .    916  1692 384  389  384  389  384  1694 921  .
-                // 67   917  384  389  384  389  384  389  384  922  71 (i=589)
-                // .    918  1693 384  389  384  389  384  1695 923  .
-                // .    .    918  1693 384  389  384  1695 923  .    .
-                // .    .    .    918  1693 384  1695 923  .    .    .
-                // .    .    .    .    918  920  923  .    .    .    .
-                // .    .    .    .    .    70   .    .    .    .    .
-                //
-                // but we probably want to avoid performing even a single simulation step after extrapolating
-                // so figure out which part of the cycle is exactly 131*n steps before the end
-                todo!();
+            insert(P::new(r1, 0));
+            insert(P::new(-r1, 0));
+            insert(P::new(0, r1));
+            insert(P::new(0, -r1));
+
+            for _ in 1..=r2 {
+                insert(P::new(r1, 1));
+                insert(P::new(r1, -1));
+                insert(P::new(-r1, 1));
+                insert(P::new(-r1, -1));
             }
+
+            for _ in 1..r2 {
+                insert(P::new(r1 - 1, 1));
+                insert(P::new(r1 - 1, -1));
+                insert(P::new(1 - r1, 1));
+                insert(P::new(1 - r1, -1));
+            }
+
+            let corner_src = tiles[&P::new(0, r1 - 1)];
+            let other_src = tiles[&P::new(0, r1 - 2)];
+            for x in 0..r2 {
+                let mut num_corner = r2 - x;
+                let mut num_other = num_corner - 1;
+
+                if x != 0 {
+                    num_corner *= 2;
+                    num_other *= 2;
+                }
+                *end.entry(corner_src).or_default() += num_corner;
+                *end.entry(other_src).or_default() += num_other;
+            }
+
+            return end
+                .iter()
+                .map(|(k, v)| memory.interned_storage[*k].len() * *v as usize)
+                .sum();
         }
     }
 
