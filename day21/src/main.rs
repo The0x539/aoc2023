@@ -235,11 +235,53 @@ fn part2(n: &[In]) -> Out {
 fn part2(n: &[In]) -> Out {
     let (start, grid) = setup(n);
 
+    let w = grid[0].len() as N;
+    let h = grid.len() as N;
+
+    let grid_at = |mut point: P| -> bool {
+        point.x %= w;
+        if point.x < 0 {
+            point.x += w;
+        }
+        point.y %= h;
+        if point.y < 0 {
+            point.y += h;
+        }
+
+        let y = point.y as usize;
+        let x = point.x as usize;
+
+        if grid[point.y as usize][point.x as usize] {
+            return true;
+        }
+
+        if (1..w as usize - 1).contains(&x)
+            && (1..h as usize - 1).contains(&y)
+            && grid[y + 1][x]
+            && grid[y - 1][x]
+            && grid[y][x - 1]
+            && grid[y][x + 1]
+        {
+            return true;
+        }
+
+        false
+    };
+
     let mut tile = HashSet::new();
-    let steps = 64;
-    for x in 0..steps {
-        for y in 0..(steps - x) {
-            tile.insert(start + (x, y));
+    let steps = 500;
+
+    for x in 0..=steps {
+        for y in 0..=(steps - x) {
+            if (x + y) % 2 == 1 {
+                continue;
+            }
+            for delta in [(x, y), (x, -y), (-x, y), (-x, -y)] {
+                let p = start + delta;
+                if !grid_at(p) {
+                    tile.insert(p);
+                }
+            }
         }
     }
 
@@ -256,7 +298,7 @@ fn part2(n: &[In]) -> Out {
         println!();
     }
 
-    0
+    tile.len()
 }
 
 util::register!(parse, part1, part2);
