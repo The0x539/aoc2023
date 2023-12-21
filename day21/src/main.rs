@@ -1,7 +1,5 @@
 #![cfg_attr(test, feature(test))]
 
-use std::rc::Rc;
-
 use util::*;
 
 type N = i32;
@@ -99,206 +97,136 @@ fn part1(n: &[In]) -> Out {
     spots.len()
 }
 
-/*
-const NESW: [(i32, i32); 4] = [(0, -1), (1, 0), (0, 1), (-1, 0)];
+type Tile = BTreeSet<P>;
 
-fn simulate_local(
-    tile: &BTreeSet<P>,
-    [north, east, south, west]: &Neighbors,
-    grid: &[Vec<bool>],
-) -> BTreeSet<P> {
-    let h = grid.len() as N;
-    let w = grid[0].len() as N;
+#[derive(Default, Debug)]
+struct Memory {
+    simulation_cache: BTreeMap<(usize, [usize; 4]), usize>,
+    interned_lookup: BTreeMap<Tile, usize>,
+    interned_storage: Vec<Tile>,
+    hits: usize,
+    misses: usize,
+}
 
-    let mut new_tile = BTreeSet::new();
-
-    for y in 0..h {
-        for x in 0..w {
-            if grid[y as usize][x as usize] {
-                continue;
-            }
-
-            let p0 = P::new(x, y);
-            for (dx, dy) in NESW {
-                let p1 = p0 + (dx, dy);
-
-                let neighbor = if p1.x == -1 {
-                    west.contains(&P::new(w - 1, p1.y))
-                } else if p1.x == w {
-                    east.contains(&P::new(0, p1.y))
-                } else if p1.y == -1 {
-                    north.contains(&P::new(p1.x, h - 1))
-                } else if p1.y == h {
-                    south.contains(&P::new(p1.x, 0))
-                } else {
-                    tile.contains(&p1)
-                };
-
-                if neighbor {
-                    new_tile.insert(p0);
-                    break;
-                }
-            }
+impl Memory {
+    fn intern(&mut self, tile: Tile) -> usize {
+        if let Some(existing) = self.interned_lookup.get(&tile) {
+            *existing
+        } else {
+            let key = self.interned_storage.len();
+            self.interned_lookup.insert(tile.clone(), key);
+            self.interned_storage.push(tile);
+            key
         }
     }
 
-    new_tile
+    fn simulate(
+        &mut self,
+        tile_idx: usize,
+        neighbor_idxs: [usize; 4],
+        grid: &[Vec<bool>],
+    ) -> usize {
+        if let Some(cached) = self.simulation_cache.get(&(tile_idx, neighbor_idxs)) {
+            self.hits += 1;
+            return *cached;
+        }
+        self.misses += 1;
+
+        let h = grid.len() as N;
+        let w = grid[0].len() as N;
+
+        let [north, east, south, west] = neighbor_idxs.map(|k| &self.interned_storage[k]);
+        let tile = &self.interned_storage[tile_idx];
+
+        let mut new_tile = BTreeSet::new();
+        for y in 0..h {
+            for x in 0..w {
+                if grid[y as usize][x as usize] {
+                    continue;
+                }
+
+                let p0 = P::new(x, y);
+                for (dx, dy) in NESW {
+                    let p1 = p0 + (dx, dy);
+
+                    let neighbor = if p1.x == -1 {
+                        west.contains(&P::new(w - 1, p1.y))
+                    } else if p1.x == w {
+                        east.contains(&P::new(0, p1.y))
+                    } else if p1.y == -1 {
+                        north.contains(&P::new(p1.x, h - 1))
+                    } else if p1.y == h {
+                        south.contains(&P::new(p1.x, 0))
+                    } else {
+                        tile.contains(&p1)
+                    };
+
+                    if neighbor {
+                        new_tile.insert(p0);
+                        break;
+                    }
+                }
+            }
+        }
+
+        let key = self.intern(new_tile);
+        self.simulation_cache.insert((tile_idx, neighbor_idxs), key);
+        key
+    }
 }
 
-#[allow(unused)]
-fn print_tiles(tiles: &BTreeMap<P, TileRef>) {
+const NESW: [(i32, i32); 4] = [(0, -1), (1, 0), (0, 1), (-1, 0)];
+
+fn part2(n: &[In]) -> Out {
+    let (start, grid) = setup(n);
+
+    let mut memory = Memory::default();
+    let blank = memory.intern(Tile::new());
+
+    let mut tiles: BTreeMap<P, usize> = BTreeMap::new();
+    tiles.insert(P::new(0, 0), memory.intern(Tile::from([start])));
+
+    let steps = if cfg!(test) { 1000 } else { 26501365 };
+    let steps = 5000;
+
+    for _i in 0..steps {
+        tiles.retain(|_, t| *t != blank);
+        for pu in Vec::from_iter(tiles.keys().copied()) {
+            for dir in NESW {
+                tiles.entry(pu + dir).or_insert(blank);
+            }
+        }
+
+        let mut new_tiles = BTreeMap::new();
+        for (&pu, &tile) in &tiles {
+            let neighbors = NESW.map(|dir| *tiles.get(&(pu + dir)).unwrap_or(&blank));
+            let new_tile = memory.simulate(tile, neighbors, &grid);
+            new_tiles.insert(pu, new_tile);
+        }
+        tiles = new_tiles;
+    }
     let x0 = tiles.keys().map(|k| k.x).min().unwrap();
     let x1 = tiles.keys().map(|k| k.x).max().unwrap();
     let y0 = tiles.keys().map(|k| k.y).min().unwrap();
     let y1 = tiles.keys().map(|k| k.y).max().unwrap();
 
-    let mut seen = BTreeMap::new();
-
     for y in y0..=y1 {
         for x in x0..=x1 {
-            let pu = P { x, y };
-            let Some(tile) = tiles.get(&pu) else {
-                print!(".\t");
+            let Some(tile) = tiles.get(&P { x, y }) else {
+                print!(".    ");
                 continue;
             };
-
-            let i = match seen.get(tile) {
-                Some(j) => *j,
-                None => {
-                    let j = seen.len();
-                    seen.insert(tile.clone(), j);
-                    j
-                }
-            };
-            print!("{i}\t");
-        }
-        println!();
-    }
-}
-
-type TileRef = Rc<BTreeSet<P>>;
-type Neighbors = [TileRef; 4];
-
-fn part2(n: &[In]) -> Out {
-    let (start, grid) = setup(n);
-
-    let empty = TileRef::default();
-    let mut tiles: BTreeMap<P, TileRef> = BTreeMap::new();
-    tiles.insert(P::new(0, 0), Rc::new(BTreeSet::from([start])));
-
-    let mut cache: BTreeMap<TileRef, BTreeMap<Neighbors, TileRef>> = BTreeMap::new();
-
-    let steps = if cfg!(test) { 1000 } else { 26501365 };
-
-    let mut last_grow = 0;
-
-    for i in 0..steps {
-        tiles.retain(|_, t| !t.is_empty());
-        let old_len = tiles.len();
-
-        for pu in Vec::from_iter(tiles.keys().copied()) {
-            for dir in NESW {
-                tiles.entry(pu + dir).or_default();
-            }
-        }
-
-        let mut new_tiles = BTreeMap::new();
-        for (&pu, tile) in &tiles {
-            let neighbors = NESW.map(|dir| tiles.get(&(pu + dir)).unwrap_or(&empty).clone());
-
-            if let Some(cached) = cache.get(tile).and_then(|c| c.get(&neighbors)) {
-                new_tiles.insert(pu, cached.clone());
-            } else {
-                let new_tile = Rc::new(simulate_local(tile, &neighbors, &grid));
-                cache
-                    .entry(tile.clone())
-                    .or_default()
-                    .insert(neighbors, new_tile.clone());
-                new_tiles.insert(pu, new_tile);
-            }
-        }
-
-        tiles = new_tiles;
-        tiles.retain(|_, t| !t.is_empty());
-        let new_len = tiles.len();
-
-        // should look the same as last time, but with one more layer of "inner body"
-        if new_len > old_len {
-            println!("grew at {i} ({} since last)", i - last_grow);
-            last_grow = i;
-        }
-    }
-
-    tiles.values().map(|t| t.len()).sum()
-}
-*/
-fn part2(n: &[In]) -> Out {
-    let (start, grid) = setup(n);
-
-    let w = grid[0].len() as N;
-    let h = grid.len() as N;
-
-    let grid_at = |mut point: P| -> bool {
-        point.x %= w;
-        if point.x < 0 {
-            point.x += w;
-        }
-        point.y %= h;
-        if point.y < 0 {
-            point.y += h;
-        }
-
-        let y = point.y as usize;
-        let x = point.x as usize;
-
-        if grid[point.y as usize][point.x as usize] {
-            return true;
-        }
-
-        if (1..w as usize - 1).contains(&x)
-            && (1..h as usize - 1).contains(&y)
-            && grid[y + 1][x]
-            && grid[y - 1][x]
-            && grid[y][x - 1]
-            && grid[y][x + 1]
-        {
-            return true;
-        }
-
-        false
-    };
-
-    let mut tile = HashSet::new();
-    let steps = 500;
-
-    for x in 0..=steps {
-        for y in 0..=(steps - x) {
-            if (x + y) % 2 == 1 {
-                continue;
-            }
-            for delta in [(x, y), (x, -y), (-x, y), (-x, -y)] {
-                let p = start + delta;
-                if !grid_at(p) {
-                    tile.insert(p);
-                }
-            }
-        }
-    }
-
-    for (row, y) in grid.iter().zip(0..) {
-        for (v, x) in row.iter().zip(0..) {
-            if grid[y as usize][x as usize] {
-                print!("#");
-            } else if tile.contains(&P { x, y }) {
-                print!("O");
-            } else {
-                print!(".");
-            }
+            print!("{tile:<5}");
         }
         println!();
     }
 
-    tile.len()
+    println!("{} {}", memory.hits, memory.misses);
+
+    tiles
+        .values()
+        .map(|k| memory.interned_storage[*k].len())
+        .sum()
 }
 
 util::register!(parse, part1, part2);
