@@ -1,0 +1,8 @@
+[package]
+name = "day22"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+slab = "0.4.9"
+util = { path = "../util" }
