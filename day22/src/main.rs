@@ -81,8 +81,8 @@ impl World {
         }
     }
 
-    fn settle_once(&mut self) -> bool {
-        let mut changed = false;
+    fn settle_once(&mut self) -> BTreeSet<usize> {
+        let mut fallen = BTreeSet::new();
 
         'outer: for (id, brick) in &mut self.bricks {
             let potential = *brick + Xyz { x: 0, y: 0, z: -1 };
@@ -93,13 +93,10 @@ impl World {
                 }
                 if let Some(&o_id) = self.spaces.get(&v) {
                     if o_id != id {
-                        // println!("{id} blocked by {o_id} at {v:?}");
                         continue 'outer;
                     }
                 }
             }
-
-            // println!("shifting {id}: {brick:?} -> {potential:?}");
 
             for v in brick.iter() {
                 assert_eq!(self.spaces.remove(&v), Some(id));
@@ -108,21 +105,32 @@ impl World {
                 assert_eq!(self.spaces.insert(v, id), None);
             }
             *brick = potential;
-            changed = true;
+            fallen.insert(id);
         }
 
-        changed
+        fallen
+    }
+
+    fn settle_fully(&mut self) -> BTreeSet<usize> {
+        let mut fallen = BTreeSet::new();
+        loop {
+            let step = self.settle_once();
+            if step.is_empty() {
+                break;
+            } else {
+                fallen.extend(step);
+            }
+        }
+        fallen
     }
 
     fn can_remove(&self, id: usize) -> bool {
-        // println!("can_remove {id}");
         let mut supported = BTreeSet::new();
 
         for v in self.bricks[id].iter() {
             let above = v + Xyz { x: 0, y: 0, z: 1 };
             if let Some(&s_id) = self.spaces.get(&above) {
                 if s_id != id {
-                    // println!("{id} supports {s_id}");
                     supported.insert(s_id);
                 }
             }
@@ -134,19 +142,16 @@ impl World {
                 let below = v + Xyz { x: 0, y: 0, z: -1 };
                 if let Some(&b_id) = self.spaces.get(&below) {
                     if b_id != id && b_id != s_id {
-                        // println!("{b_id} also supports {s_id}");
                         has_other_supports = true;
                         break;
                     }
                 }
             }
             if !has_other_supports {
-                // println!("{s_id} is unsupported");
                 return false;
             }
         }
 
-        // println!("can INDEED remove {id}");
         true
     }
 }
@@ -203,7 +208,7 @@ fn part1(n: &[In]) -> Out {
         world.insert(*brick);
     }
 
-    while world.settle_once() {}
+    world.settle_fully();
 
     let mut count = 0;
     for (id, _) in &world.bricks {
@@ -215,7 +220,24 @@ fn part1(n: &[In]) -> Out {
 }
 
 fn part2(n: &[In]) -> Out {
-    Default::default()
+    let mut world = World::default();
+    for brick in n {
+        world.insert(*brick);
+    }
+
+    world.settle_fully();
+    let world = world;
+
+    let mut total = 0;
+    for id in 0..world.bricks.len() {
+        let mut w = world.clone();
+        let brick = w.bricks.remove(id);
+        for v in brick.iter() {
+            w.spaces.remove(&v);
+        }
+        total += w.settle_fully().len();
+    }
+    total
 }
 
 util::register!(parse, part1, part2);
