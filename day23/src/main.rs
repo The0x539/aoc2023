@@ -28,52 +28,6 @@ fn parse(s: &'static str) -> In {
         .collect()
 }
 
-fn part1(n: &[In]) -> Out {
-    let mut hikes = vec![vec![P::new(1, 0)]];
-    let w = n[0].len() as N;
-    let h = n.len() as N;
-
-    let mut finished_hikes: Vec<Vec<P>> = vec![];
-
-    while !hikes.is_empty() {
-        for hike in std::mem::take(&mut hikes) {
-            let mut continuing = false;
-
-            let cur = hike[hike.len() - 1];
-
-            let directions = match n[cur.y as usize][cur.x as usize] {
-                Tile::Slope(d) => vec![d],
-                _ => NESW.to_vec(),
-            };
-
-            for direction in directions {
-                let step = cur + direction;
-                if (0..w).contains(&step.x)
-                    && (0..h).contains(&step.y)
-                    && n[step.y as usize][step.x as usize] != Tile::Forest
-                    && !hike.contains(&step)
-                {
-                    continuing = true;
-                    let mut h = hike.clone();
-                    h.push(step);
-                    hikes.push(h);
-                }
-            }
-
-            if !continuing {
-                finished_hikes.push(hike);
-            }
-        }
-    }
-
-    finished_hikes
-        .iter()
-        .filter(|hike| hike.ends_with(&[P::new(w - 2, h - 1)]))
-        .map(|hike| hike.len() - 1)
-        .max()
-        .unwrap()
-}
-
 #[derive(Clone)]
 struct Hike {
     current: P,
@@ -90,7 +44,7 @@ impl Hike {
         }
     }
 
-    fn walk(&mut self, edge: &[P]) {
+    fn walk(&mut self, edge: &Edge) {
         self.current = *edge.last().unwrap();
         self.visited.insert(self.current);
         self.len += edge.len();
@@ -99,11 +53,11 @@ impl Hike {
 
 const NESW: [(N, N); 4] = [(0, -1), (1, 0), (0, 1), (-1, 0)];
 
-struct World {
-    map: Vec<Vec<Tile>>,
+struct World<'a> {
+    map: &'a [Vec<Tile>],
 }
 
-impl World {
+impl World<'_> {
     fn try_get(&self, p: P) -> Option<Tile> {
         if p.x < 0 || p.y < 0 {
             return None;
@@ -123,62 +77,95 @@ impl World {
             .map(move |d| p + d)
             .filter(|p| self.is_path(*p))
     }
+
+    fn dimensions(&self) -> P {
+        let h = self.map.len() as N;
+        let w = self.map[0].len() as N;
+        P::new(w, h)
+    }
 }
 
-fn part2(n: &[In]) -> Out {
-    let start = P::new(1, 0);
-    let goal = P::new(n[0].len() as N - 2, n.len() as N - 1);
+type Edge = Vec<P>;
+type Graph = BTreeMap<P, Vec<Edge>>;
 
-    let world = World { map: n.into() };
+fn build_graph(world: &World, origin: P, part2: bool) -> Graph {
+    let mut graph = Graph::new();
 
-    let mut graph = BTreeMap::<P, Vec<Vec<P>>>::new();
-
-    let mut nodes = vec![P::new(1, 0)];
+    let mut nodes = vec![origin];
     while let Some(start) = nodes.pop() {
-        for d in NESW {
-            if !world.is_path(start + d) {
-                continue;
-            }
-
-            let mut previous = start;
-            let mut current = start + d;
-
-            if let Some(branches) = graph.get(&start) {
-                if branches.iter().any(|e| e[0] == current) {
-                    continue;
-                }
-            }
-
-            let mut edge = vec![current];
-
-            while let Ok(next) = world
-                .options(current)
-                .filter(|o| *o != previous)
-                .exactly_one()
-            {
-                previous = current;
-                current = next;
-                edge.push(current);
-            }
-
-            graph.entry(start).or_default().push(edge.clone());
-
-            edge.pop();
-            edge.reverse();
-            edge.push(start);
-            graph.entry(current).or_default().push(edge);
-
-            nodes.push(current);
+        for direction in NESW {
+            visit_edge(world, &mut graph, &mut nodes, start, direction, part2);
         }
     }
 
-    let mut finished = vec![];
-    let mut ongoing = vec![Hike::new(start)];
+    graph
+}
 
-    while !ongoing.is_empty() {
-        for hike in std::mem::take(&mut ongoing) {
+fn visit_edge(
+    world: &World,
+    graph: &mut Graph,
+    nodes: &mut Vec<P>,
+    start: P,
+    dir: (N, N),
+    part2: bool,
+) {
+    let mut prev = start;
+    let mut current = start + dir;
+
+    let Some(tile) = world.try_get(current) else {
+        return;
+    };
+
+    let mut directed = false;
+    match tile {
+        Tile::Forest => return,
+        Tile::Path => {}
+        Tile::Slope(slope) => {
+            directed = true;
+            if slope != dir && !part2 {
+                // wrong direction
+                return;
+            }
+        }
+    }
+
+    if let Some(edges) = graph.get(&start) {
+        if edges.iter().any(|e| e[0] == current) {
+            // this edge has already been visited
+            return;
+        }
+    }
+
+    let mut edge = vec![current];
+    while let Ok(next) = world.options(current).filter(|o| *o != prev).exactly_one() {
+        prev = current;
+        current = next;
+        edge.push(current);
+    }
+
+    graph.entry(start).or_default().push(edge.clone());
+    if !directed {
+        edge.pop();
+        edge.reverse();
+        edge.push(start);
+        graph.entry(current).or_default().push(edge);
+    }
+    nodes.push(current);
+}
+
+fn solve(map: &[In], part2: bool) -> Out {
+    let world = World { map };
+    let start = P::new(1, 0);
+    let goal = world.dimensions() + (-2, -1);
+    let graph = build_graph(&world, start, part2);
+
+    let mut finished_hikes = vec![];
+    let mut ongoing_hikes = vec![Hike::new(start)];
+
+    while !ongoing_hikes.is_empty() {
+        for hike in std::mem::take(&mut ongoing_hikes) {
             if hike.current == goal {
-                finished.push(hike);
+                finished_hikes.push(hike);
                 continue;
             }
 
@@ -187,13 +174,21 @@ fn part2(n: &[In]) -> Out {
                 if !hike.visited.contains(&next) {
                     let mut h = hike.clone();
                     h.walk(edge);
-                    ongoing.push(h);
+                    ongoing_hikes.push(h);
                 }
             }
         }
     }
 
-    finished.into_iter().map(|h| h.len).max().unwrap()
+    finished_hikes.into_iter().map(|h| h.len).max().unwrap()
+}
+
+fn part1(n: &[In]) -> Out {
+    solve(n, false)
+}
+
+fn part2(n: &[In]) -> Out {
+    solve(n, true)
 }
 
 util::register!(parse, part1, part2);
