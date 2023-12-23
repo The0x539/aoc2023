@@ -41,10 +41,16 @@ where
     ints(s).try_into().ok().unwrap()
 }
 
-#[derive(Debug, Default, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Default, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Pos<N> {
     pub x: N,
     pub y: N,
+}
+
+impl<N: Debug> Debug for Pos<N> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "({:?}, {:?})", self.x, self.y)
+    }
 }
 
 impl<N> Pos<N> {
