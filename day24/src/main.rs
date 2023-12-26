@@ -1,10 +1,10 @@
 #![cfg_attr(test, feature(test))]
-#![feature(sort_floats)]
 
 use itertools::Itertools;
+use rand::seq::SliceRandom;
 use util::*;
 
-type N = i128;
+type N = i64;
 
 #[derive(Copy, Clone, Debug, PartialEq, Default, Eq, Hash)]
 struct Xyz {
@@ -17,22 +17,6 @@ struct Xyz {
 struct Projectile {
     pos: Xyz,
     vel: Xyz,
-}
-
-impl Projectile {
-    fn advance(&mut self, n: N) {
-        self.pos.x += n * self.vel.x;
-        self.pos.y += n * self.vel.y;
-        self.pos.z += n * self.vel.z;
-    }
-}
-
-impl Xyz {
-    fn sqrlen(&self, other: Xyz) -> u128 {
-        self.x.abs_diff(other.x).pow(2)
-            + self.y.abs_diff(other.y).pow(2)
-            + self.z.abs_diff(other.z).pow(2)
-    }
 }
 
 impl std::fmt::Debug for Projectile {
@@ -137,61 +121,13 @@ fn part1(n: &[In]) -> Out {
             continue;
         }
 
-        // if !is_future(v[0], x) || !is_future(v[1], x) {
-        //     continue;
-        // }
+        if !is_future(v[0], x) || !is_future(v[1], x) {
+            continue;
+        }
 
         pairs.insert((v[0], v[1]));
     }
-    let n = pairs.len();
-
-    let mut counts = HashMap::<In, u32>::new();
-    for (a, b) in pairs {
-        *counts.entry(a).or_default() += 1;
-        *counts.entry(b).or_default() += 1;
-    }
-
-    let mut counts = Vec::from_iter(counts);
-    counts.sort_by_key(|c| c.1);
-
-    for c in counts {
-        println!("{c:?}");
-    }
-
-    n
-}
-
-fn bbox(stones: &[In]) -> u128 {
-    // let mut p0 = Xyz {
-    //     x: N::MAX,
-    //     y: N::MAX,
-    //     z: N::MAX,
-    // };
-    // let mut p1 = Xyz {
-    //     x: N::MIN,
-    //     y: N::MIN,
-    //     z: N::MIN,
-    // };
-    // for s in stones {
-    //     p0.x = p0.x.min(s.pos.x);
-    //     p0.y = p0.y.min(s.pos.y);
-    //     p0.z = p0.z.min(s.pos.z);
-    //     p1.x = p1.x.max(s.pos.x);
-    //     p1.y = p1.y.max(s.pos.y);
-    //     p1.z = p1.z.max(s.pos.z);
-    // }
-    // let width = BigInt::from(p1.x - p0.x);
-    // let height = BigInt::from(p1.y - p0.y);
-    // let depth = BigInt::from(p1.z - p0.z);
-    // // width * height * depth
-    // width
-    let n = stones
-        .iter()
-        .copied()
-        .combinations(2)
-        .map(|pair| pair[0].pos.sqrlen(pair[1].pos))
-        .sum();
-    n
+    pairs.len()
 }
 
 fn part2(input: &[In]) -> Out {
@@ -246,7 +182,214 @@ fn part2(input: &[In]) -> Out {
     └                                                                  ┘
     */
 
-    0
+    // now we know how to construct a linear system of 900 equations (15 in the test case) with 9 unknowns
+    // in theory, we can solve the problem with 9 equations (3 trajectories)
+    // let's try it
+
+    let mut input = input.to_vec();
+    input.shuffle(&mut rand::thread_rng());
+
+    let mut equations = vec![];
+    for ray in input.iter().copied().take(3) {
+        let p = ray.pos;
+        let v = ray.vel;
+        let xy = [1, 0, 0, v.y, -v.x, 0, -p.y, p.x, 0, v.x * p.y - p.x * v.y];
+        let yz = [0, 1, 0, 0, v.z, -v.y, 0, -p.z, p.y, v.y * p.z - p.y * v.z];
+        let xz = [0, 0, 1, v.z, 0, -v.x, -p.z, 0, p.x, v.x * p.z - p.x * v.z];
+        equations.extend([xy, yz, xz].map(|eqn| eqn.map(|term| term as f64)));
+    }
+
+    row_reduce(&mut equations);
+    round(&mut equations);
+    back_substitute(&mut equations);
+    round(&mut equations);
+    reduce_row_echelon(&mut equations);
+    round(&mut equations);
+
+    print_matrix(&equations);
+
+    let (_qxy, _qyz, _qxz, px, py, pz, _vx, _vy, _vz) = equations
+        .iter()
+        .map(|row| row[row.len() - 1])
+        .next_tuple()
+        .unwrap();
+
+    assert_eq!(px.signum(), py.signum());
+    assert_eq!(py.signum(), pz.signum());
+
+    let [x, y, z] = [px, py, pz].map(|n| n.abs().round() as usize);
+    x + y + z
+}
+
+// Get a matrix into triangular form.
+fn row_reduce<const N: usize>(matrix: &mut [[f64; N]]) {
+    for i in 0..matrix.len() {
+        if matrix[i][i] == 0.0 {
+            // oh no, the current "src" row has a 0 diagonal value
+            // quick, fix it
+            for j in (i + 1)..matrix.len() {
+                // rows in matrix[i..] are interchangeable
+                // they're all filled with 0 in row[..i]
+                // just find one where row[i] is nonzero
+                if matrix[j][i] != 0.0 {
+                    // and exchange them
+                    matrix.swap(i, j);
+                    break;
+                }
+            }
+        }
+
+        let src = matrix[i];
+        assert_ne!(src[i], 0.0);
+
+        for j in (i + 1)..matrix.len() {
+            let dst = &mut matrix[j];
+            if dst[i] == 0.0 {
+                continue;
+            }
+            let ratio = dst[i] / src[i];
+            for (d, s) in std::iter::zip(dst, src) {
+                *d -= ratio * s;
+            }
+        }
+    }
+}
+
+// Get a triangular matrix into row-echelon form.
+fn back_substitute<const N: usize>(matrix: &mut [[f64; N]]) {
+    for i in (0..matrix.len()).rev() {
+        let src = matrix[i];
+        assert_ne!(src[i], 0.0);
+
+        for j in 0..i {
+            let dst = &mut matrix[j];
+            if dst[i] == 0.0 {
+                continue;
+            }
+            let ratio = dst[i] / src[i];
+            for (d, s) in std::iter::zip(dst, src) {
+                *d -= ratio * s;
+            }
+        }
+    }
+}
+
+// Get a row-echelon matrix into reduced row-echelon form.
+fn reduce_row_echelon<const N: usize>(matrix: &mut [[f64; N]]) {
+    for i in 0..matrix.len() {
+        let a = matrix[i][i];
+        assert_ne!(a, 0.0);
+        for b in &mut matrix[i] {
+            *b /= a;
+        }
+    }
+}
+
+// Smooth out floating-point rounding errors.
+// Ideally, we'd have done all this work in integer space to begin with,
+// but that would require much more checking-for-divisibility than I'd like.
+fn round<const N: usize>(matrix: &mut [[f64; N]]) {
+    for v in matrix.iter_mut().flatten() {
+        let fr = v.fract().abs();
+        if fr < 0.000000001 || fr > 0.999999999 {
+            *v = v.round();
+        }
+    }
 }
 
 util::register!(parse, part1, part2);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    type Mat = [[f64; 4]; 3];
+
+    const INITIAL: Mat = [
+        [2.0, 1.0, -1.0, 8.0],
+        [-3.0, -1.0, 2.0, -11.0],
+        [-2.0, 1.0, 2.0, -3.0],
+    ];
+
+    const TRIANGULAR: Mat = [
+        [2.0, 1.0, -1.0, 8.0],
+        [0.0, 0.5, 0.5, 1.0],
+        [0.0, 0.0, -1.0, 1.0],
+    ];
+
+    const ECHELON: Mat = [
+        [2.0, 0.0, 0.0, 4.0],
+        [0.0, 0.5, 0.0, 1.5],
+        [0.0, 0.0, -1.0, 1.0],
+    ];
+
+    const SOLVED: Mat = [
+        [1.0, 0.0, 0.0, 2.0],
+        [0.0, 1.0, 0.0, 3.0],
+        [0.0, 0.0, 1.0, -1.0],
+    ];
+
+    fn check_eq(actual: Mat, expected: Mat) {
+        if actual != expected {
+            eprintln!("expected:");
+            print_matrix(&expected);
+            eprintln!("actual:");
+            print_matrix(&actual);
+            panic!("matrices were not equal");
+        }
+    }
+
+    #[test]
+    fn test_row_reduction() {
+        let mut matrix = INITIAL;
+        row_reduce(&mut matrix);
+        let expected = TRIANGULAR;
+        check_eq(matrix, expected);
+    }
+
+    #[test]
+    fn test_back_substitution() {
+        let mut matrix = TRIANGULAR;
+        back_substitute(&mut matrix);
+        let expected = ECHELON;
+        check_eq(matrix, expected);
+    }
+
+    #[test]
+    fn test_row_echelon_reduction() {
+        let mut matrix = ECHELON;
+        reduce_row_echelon(&mut matrix);
+        let expected = SOLVED;
+        check_eq(matrix, expected);
+    }
+}
+
+pub fn print_matrix<const N: usize>(matrix: &[[f64; N]]) {
+    let widths: [usize; N] = std::array::from_fn(|i| {
+        matrix
+            .iter()
+            .map(|row| row[i].to_string().len())
+            .max()
+            .unwrap()
+    });
+
+    print!("┌ ");
+    for width in widths {
+        print!(" {: <width$}", "");
+    }
+    println!("┐");
+
+    for row in matrix {
+        print!("│ ");
+        for (value, width) in std::iter::zip(row, widths) {
+            print!("{value:width$} ");
+        }
+        println!("│");
+    }
+
+    print!("└ ");
+    for width in widths {
+        print!(" {: <width$}", "");
+    }
+    println!("┘");
+}
