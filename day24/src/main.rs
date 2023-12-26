@@ -195,8 +195,6 @@ fn bbox(stones: &[In]) -> u128 {
 }
 
 fn part2(input: &[In]) -> Out {
-    let mut equations = Vec::new();
-
     /*
     the input is 300 trajectories: pᵢˣʸᶻ + t * vᵢˣʸᶻ
     we are solving for a 301st trajectory,  pˣʸᶻ + t * vˣʸᶻ, that intersects with each of them (for 300 different `t` values)
@@ -240,7 +238,12 @@ fn part2(input: &[In]) -> Out {
     │ 1  , vᵢᵇ, pᵢᵃ, -vᵢᵃ, -pᵢᵇ, vᵢᵃpᵢᵇ - pᵢᵃvᵢᵇ │
     └                                            ┘
     // return to x/y/z notation
-    TODO
+    ┌                                                                  ┐
+    │ qˣʸ, qʸᶻ, qˣᶻ, pˣ ,  pʸ ,  pᶻ ,  vˣ ,  vʸ , vᶻ , 1               │
+    │ 1  , 0  , 0  , vᵢʸ, -vᵢˣ,  0  , -pᵢʸ,  pᵢˣ, 0  , vᵢˣpᵢʸ - pᵢˣvᵢʸ │
+    │ 0  , 1  , 0  , 0  ,  vᵢᶻ, -vᵢʸ,  0  , -pᵢᶻ, pᵢʸ, vᵢʸpᵢᶻ - pᵢʸvᵢᶻ │
+    │ 0  , 0  , 1  , vᵢᶻ,  0  , -vᵢˣ, -pᵢᶻ,  0  , pᵢˣ, vᵢˣpᵢᶻ - pᵢˣvᵢᶻ │
+    └                                                                  ┘
     */
 
     0
