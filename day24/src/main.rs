@@ -1,10 +1,12 @@
 #![cfg_attr(test, feature(test))]
+#![feature(array_windows)]
 
 use itertools::Itertools;
-use rand::seq::SliceRandom;
 use util::*;
 
 type N = i64;
+type In = Projectile;
+type Out = N;
 
 #[derive(Copy, Clone, Debug, PartialEq, Default, Eq, Hash)]
 struct Xyz {
@@ -18,50 +20,6 @@ struct Projectile {
     pos: Xyz,
     vel: Xyz,
 }
-
-impl std::fmt::Debug for Projectile {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Xyz { x, y, z } = self.pos;
-        write!(f, "({x} {y} {z}")?;
-        let Xyz { x, y, z } = self.vel;
-        write!(f, " @ {x} {y} {z})")
-    }
-}
-
-impl std::ops::AddAssign for Xyz {
-    fn add_assign(&mut self, rhs: Self) {
-        self.x += rhs.x;
-        self.y += rhs.y;
-        self.z += rhs.z;
-    }
-}
-
-impl std::ops::Add for Xyz {
-    type Output = Self;
-    fn add(mut self, rhs: Self) -> Self::Output {
-        self += rhs;
-        self
-    }
-}
-
-impl std::ops::SubAssign for Xyz {
-    fn sub_assign(&mut self, rhs: Self) {
-        self.x -= rhs.x;
-        self.y -= rhs.y;
-        self.z -= rhs.z;
-    }
-}
-
-impl std::ops::Sub for Xyz {
-    type Output = Self;
-    fn sub(mut self, rhs: Self) -> Self::Output {
-        self -= rhs;
-        self
-    }
-}
-
-type In = Projectile;
-type Out = usize;
 
 fn parse(s: &'static str) -> In {
     let [a, b, c, d, e, f] = ints_n(s);
@@ -92,9 +50,7 @@ fn part1(n: &[In]) -> Out {
         200000000000000.0..=400000000000000.0
     };
 
-    to_slope_intercept(n[0]);
-
-    let mut pairs = HashSet::new();
+    let mut count = 0;
     for v in n.iter().copied().combinations(2) {
         let (m1, b1) = to_slope_intercept(v[0]);
         let (m2, b2) = to_slope_intercept(v[1]);
@@ -125,12 +81,12 @@ fn part1(n: &[In]) -> Out {
             continue;
         }
 
-        pairs.insert((v[0], v[1]));
+        count += 1;
     }
-    pairs.len()
+    count
 }
 
-fn part2(input: &[In]) -> Out {
+fn part2_mini(input: &[In; 3]) -> Option<(f64, f64, f64)> {
     /*
     the input is 300 trajectories: pᵢˣʸᶻ + t * vᵢˣʸᶻ
     we are solving for a 301st trajectory,  pˣʸᶻ + t * vˣʸᶻ, that intersects with each of them (for 300 different `t` values)
@@ -186,11 +142,8 @@ fn part2(input: &[In]) -> Out {
     // in theory, we can solve the problem with 9 equations (3 trajectories)
     // let's try it
 
-    let mut input = input.to_vec();
-    input.shuffle(&mut rand::thread_rng());
-
     let mut equations = vec![];
-    for ray in input.iter().copied().take(3) {
+    for ray in input {
         let p = ray.pos;
         let v = ray.vel;
         let xy = [1, 0, 0, v.y, -v.x, 0, -p.y, p.x, 0, v.x * p.y - p.x * v.y];
@@ -199,14 +152,11 @@ fn part2(input: &[In]) -> Out {
         equations.extend([xy, yz, xz].map(|eqn| eqn.map(|term| term as f64)));
     }
 
-    row_reduce(&mut equations);
-    round(&mut equations);
+    // the rounding is a bit of a crapshoot
+    row_reduce(&mut equations)?;
     back_substitute(&mut equations);
-    round(&mut equations);
     reduce_row_echelon(&mut equations);
     round(&mut equations);
-
-    print_matrix(&equations);
 
     let (_qxy, _qyz, _qxz, px, py, pz, _vx, _vy, _vz) = equations
         .iter()
@@ -214,15 +164,31 @@ fn part2(input: &[In]) -> Out {
         .next_tuple()
         .unwrap();
 
-    assert_eq!(px.signum(), py.signum());
-    assert_eq!(py.signum(), pz.signum());
+    Some((px, py, pz))
+}
 
-    let [x, y, z] = [px, py, pz].map(|n| n.abs().round() as usize);
-    x + y + z
+fn part2(n: &[In]) -> Out {
+    // alternative approach: try the cartesian product of ceil vs. floor for each coordinate
+    // it's only 8 combinations - check if that choice of rounding is actually a solution
+
+    // hopefully almost 300 opinions is enough to find an answer that rounded correctly
+    for trio in n.array_windows() {
+        let Some((px, py, pz)) = part2_mini(trio) else {
+            continue;
+        };
+        // check that rounding errors were small enough to get smoothed out
+        if px.fract() == 0.0 && py.fract() == 0.0 && pz.fract() == 0.0 {
+            // for some reason my answer comes out negative, but that's not really a problem
+            assert_eq!(px.signum(), py.signum());
+            assert_eq!(py.signum(), pz.signum());
+            return (px as N + py as N + pz as N).abs();
+        }
+    }
+    panic!("well darn");
 }
 
 // Get a matrix into triangular form.
-fn row_reduce<const N: usize>(matrix: &mut [[f64; N]]) {
+fn row_reduce<const N: usize>(matrix: &mut [[f64; N]]) -> Option<()> {
     for i in 0..matrix.len() {
         if matrix[i][i] == 0.0 {
             // oh no, the current "src" row has a 0 diagonal value
@@ -240,7 +206,10 @@ fn row_reduce<const N: usize>(matrix: &mut [[f64; N]]) {
         }
 
         let src = matrix[i];
-        assert_ne!(src[i], 0.0);
+        if src[i] == 0.0 {
+            // idk, it happens
+            return None;
+        }
 
         for j in (i + 1)..matrix.len() {
             let dst = &mut matrix[j];
@@ -253,6 +222,8 @@ fn row_reduce<const N: usize>(matrix: &mut [[f64; N]]) {
             }
         }
     }
+
+    Some(())
 }
 
 // Get a triangular matrix into row-echelon form.
